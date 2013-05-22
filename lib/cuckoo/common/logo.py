@@ -140,7 +140,7 @@ def logo():
 
     print(color(random.choice(logos), random.randrange(31, 37)))
     print
-    print(" Cuckoo Sandbox %s" % yellow(CUCKOO_VERSION))
+    print(" Distributed Cuckoo Sandbox %s" % yellow(CUCKOO_VERSION))
     print(" www.cuckoosandbox.org")
     print(" Copyright (c) 2010-2013")
     print

@@ -16,6 +16,7 @@ from lib.cuckoo.common.exceptions import CuckooGuestError
 from lib.cuckoo.common.exceptions import CuckooOperationalError
 from lib.cuckoo.common.exceptions import CuckooCriticalError
 from lib.cuckoo.common.abstracts import  MachineManager
+from lib.cuckoo.common.abstracts import  NestManager
 from lib.cuckoo.common.objects import Dictionary, File
 from lib.cuckoo.common.utils import  create_folders, create_folder
 from lib.cuckoo.common.config import Config
@@ -30,6 +31,7 @@ from lib.cuckoo.core.plugins import import_plugin, list_plugins
 log = logging.getLogger(__name__)
 
 mmanager = None
+nmanager = None
 machine_lock = Lock()
 
 class AnalysisManager(Thread):
@@ -167,7 +169,7 @@ class AnalysisManager(Thread):
 
         log.info("Starting analysis of %s \"%s\" (task=%d)", self.task.category.upper(), self.task.target, self.task.id)
 
-        # Initialize the the analysis folders.
+        # Initialize the analysis folders.
         if not self.init_storage():
             return False
 
@@ -332,31 +334,53 @@ class Scheduler:
 
     def initialize(self):
         """Initialize the machine manager."""
+        # Machine manager
         global mmanager
+        # Nest manager
+        global nmanager
 
         mmanager_name = self.cfg.cuckoo.machine_manager
+        nmanager_name = self.cfg.cuckoo.nest_manager
 
         log.info("Using \"%s\" machine manager", mmanager_name)
+        log.info("Using \"%s\" nest manager", nmanager_name)
 
         # Get registered class name. Only one machine manager is imported,
         # therefore there should be only one class in the list.
-        plugin = list_plugins("machinemanagers")[0]
+        mplugin = list_plugins("machinemanagers")[0]
+        # Get registered class name. Only one nest manager is imported?,
+        # therefore there should be only one class in the list.
+        nplugin = list_plugins("nestmanagers")[0]
         # Initialize the machine manager.
-        mmanager = plugin()
+        mmanager = mplugin()
+        nmanager = nplugin()
 
         # Find its configuration file.
-        conf = os.path.join(CUCKOO_ROOT, "conf", "%s.conf" % mmanager_name)
+        mconf = os.path.join(CUCKOO_ROOT, "conf", "%s.conf" % mmanager_name)
+        nconf = os.path.join(CUCKOO_ROOT, "conf", "%s.conf" % nmanager_name)
 
-        if not os.path.exists(conf):
+        if not os.path.exists(mconf):
             raise CuckooCriticalError("The configuration file for machine "
                                       "manager \"{0}\" does not exist at path: "
-                                      "{1}".format(mmanager_name, conf))
+                                      "{1}".format(mmanager_name, mconf))
+        if not os.path.exists(nconf):
+            raise CuckooCriticalError("The configuration file for nest "
+                                      "manager \"{0}\" does not exist at path: "
+                                      "{1}".format(mmanager_name, nconf))
 
         # Provide a dictionary with the configuration options to the
         # machine manager instance.
-        mmanager.set_options(Config(conf))
+        mmanager.set_options(Config(mconf))
+
+        # Provide a dictionary with the configuration options to the
+        # nest manager instance.
+        nmanager.set_options(Config(nconf))
+
         # Initialize the machine manager.
         mmanager.initialize(mmanager_name)
+
+        # Initialize the nest manager.
+        nmanager.initialize(nmanager_name)
 
         # At this point all the available machines should have been identified
         # and added to the list. If none were found, Cuckoo needs to abort the
@@ -365,6 +389,11 @@ class Scheduler:
             raise CuckooCriticalError("No machines available")
         else:
             log.info("Loaded %s machine/s", len(mmanager.machines()))
+
+        if len(nmanager.nests()) == 0:
+            raise CuckooCriticalError("No nests available")
+        else:
+            log.info("Loaded %s nest/s", len(nmanager.nests()))
 
 
     def stop(self):
@@ -389,6 +418,11 @@ class Scheduler:
             # If no machines are available, it's pointless to fetch for
             # pending tasks. Loop over.
             if mmanager.availables() == 0:
+                continue
+                
+            # If no nest are available, it's pointless to fetch for
+            # pending tasks. Loop over.
+            if nmanager.availables() == 0:
                 continue
 
             # Fetch a pending analysis task.

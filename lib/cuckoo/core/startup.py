@@ -203,6 +203,10 @@ def init_modules():
     import_plugin("modules.machinemanagers.%s"
                   % Config().cuckoo.machine_manager)
 
+    # Import nest manager.
+    import_plugin("modules.nestmanagers.%s"
+                  % Config().cuckoo.nest_manager)
+
     for category, mods in list_plugins().items():
         log.debug("Imported \"%s\" modules:" % category)
 

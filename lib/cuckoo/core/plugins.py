@@ -8,6 +8,7 @@ import logging
 from collections import defaultdict
 
 from lib.cuckoo.common.exceptions import CuckooCriticalError
+from lib.cuckoo.common.abstracts import NestManager
 from lib.cuckoo.common.abstracts import MachineManager
 from lib.cuckoo.common.abstracts import Processing
 from lib.cuckoo.common.abstracts import Signature
@@ -37,6 +38,8 @@ def import_package(package):
 def load_plugins(module):
     for name, value in inspect.getmembers(module):
         if inspect.isclass(value):
+            if issubclass(value, NestManager) and value is not NestManager:
+                register_plugin("nestmanagers", value)
             if issubclass(value, MachineManager) and value is not MachineManager:
                 register_plugin("machinemanagers", value)
             elif issubclass(value, Processing) and value is not Processing:

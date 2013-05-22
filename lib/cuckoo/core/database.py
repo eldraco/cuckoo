@@ -563,13 +563,16 @@ class Database(object):
         finally:
             session.close()
 
-    def list_nests(self, state='Ready'):
+    def list_nests(self, state=False):
         """Lists nests.
         @return: list of nests 
         """
         session = self.Session()
         try:
-            nests = session.query(Nest).filter(Nest.status == state).all()
+            if state:
+                nests = session.query(Nest).filter(Nest.status == state).all()
+            else:
+                nests = session.query(Nest).all()
         except SQLAlchemyError:
             return None
         finally:

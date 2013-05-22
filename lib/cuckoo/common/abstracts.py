@@ -20,6 +20,185 @@ from lib.cuckoo.core.database import Database
 
 log = logging.getLogger(__name__)
 
+class NestManager(object):
+    """Base abstract class for analysis nest manager."""
+
+    def __init__(self):
+        self.module_name = "" 
+        self.options = None
+        self.options_globals = Config(os.path.join(CUCKOO_ROOT, "conf", "cuckoo.conf"))
+        # Database pointer.
+        self.db = Database()  
+        # Petripot table is cleaned to be filled from configuration file at each start.
+        self.db.clean_nests() 
+
+    def set_options(self, options):
+        """Set petripot manager options.
+        @param options: petripot manager options dict.
+        """                   
+        self.options = options
+
+    def initialize(self, module_name): 
+        """Read and load petripots configuration, try to check the configuration.
+        @param module_name: module name.
+        """
+        # Load.
+        self._initialize(module_name)  
+
+        # Run initialization checks.   
+        self._initialize_check()       
+
+    def _initialize(self, module_name):
+        """Read configuration.
+        @param module_name: module name.
+        """
+        self.module_name = module_name
+        nmanager_opts = self.options.get(module_name)
+
+        for nest_id in nmanager_opts["nests"].strip().split(","):
+            try:
+                nest_opts = self.options.get(nest_id.strip())
+                nest = Dictionary()
+                nest.id = nest_id.strip()
+                nest.label = nest_opts["label"].strip()
+                nest.platform = nest_opts["platform"].strip()
+                nest.ip = nest_opts["ip"].strip()
+
+                self.db.add_nest(name=nest.id,
+                                    label=nest.label,
+                                    ip=nest.ip,
+                                    platform=nest.platform)
+            except (AttributeError, CuckooOperationalError):
+                log.warning("Configuration details about nest %s are missing. Continue", nest_id)
+                continue
+
+    def _initialize_check(self):
+        """Runs checks against virtualization software when a nest manager 
+        is initialized.
+        @note: in nest manager modules you may override or superclass 
+               his method.
+        @raise CuckooNestError: if a misconfiguration or a unkown vm state
+                                   is found.
+        """
+        try:
+            configured_vm = self._list()
+        except NotImplementedError:
+            return
+
+        for nest in self.nests():
+            if nest.label not in configured_vm:
+                raise CuckooCriticalError("Configured nest {0} was not detected or it's not in proper state".format(nest.label))
+
+        if not self.options_globals.timeouts.vm_state:
+            raise CuckooCriticalError("Virtual nest state change timeout setting not found, please add it to the config file")
+
+    def nests(self):
+        """List virtual nests.
+        @return: virtual nests list
+        """
+        return self.db.list_nests()
+
+    def availables(self):
+        """How many nests are free.
+        @return: free nests count.
+        """
+        return self.db.count_nests_available()
+
+    def acquire(self, nest_id=None, platform=None):
+        """Acquire a nest to start analysis.
+        @param nest: nest ID.
+        @param platform: nest platform.
+        @return: nest or None.
+        """
+        if nest_id:
+            return self.db.lock_nest(name=nest_id)
+        elif platform:
+            return self.db.lock_nest(platform=platform)
+        else:
+            return self.db.lock_nest()
+
+    def release(self, label=None):
+        """Release a nest.
+        @param label: nest name.
+        """
+        self.db.unlock_nest(label)
+
+    def running(self):
+        """Returns running virtual nests.
+        @return: running virtual nests list.
+        """
+        return self.db.list_nests(locked=True)
+
+    def shutdown(self):
+        """Shutdown the nest manager. Kills all alive nests.
+        @raise CuckooNestError: if unable to stop nest.
+        """
+        if len(self.running()) > 0:
+            log.info("Still %s guests alive. Shutting down...", len(self.running()))
+            for nest in self.running():
+                try:
+                    self.stop(nest.label)
+                except CuckooMetripotError as e:
+                    log.warning("Unable to shutdown nest %s, please check "
+                                "manually. Error: %s", nest.label, e)
+
+    def set_status(self, label, status):
+        """Set status for a virtual nest.
+        @param label: virtual nest label
+        @param status: new virtual nest status
+        """
+        self.db.set_nest_status(label, status)
+
+    def start(self, label=None):
+        """Start a nest.
+        @param label: nest name.
+        @raise NotImplementedError: this method is abstract.
+        """
+        raise NotImplementedError
+
+    def stop(self, label=None):
+        """Stop a nest.
+        @param label: nest name.
+        @raise NotImplementedError: this method is abstract.
+        """
+        raise NotImplementedError
+
+    def _list(self):
+        """Lists virtual nests configured.
+        @raise NotImplementedError: this method is abstract.
+        """
+        raise NotImplementedError
+
+    def dump_memory(self, path):
+        """Takes a memory dump of a nest.
+        @param path: path to where to store the memory dump.
+        """
+        raise NotImplementedError
+
+    def _wait_status(self, label, state):
+        """Waits for a vm status.
+        @param label: virtual nest name.
+        @param state: virtual nest status, accepts more than one states in a list.
+        @raise CuckooMetripotError: if default waiting timeout expire.
+        """
+        # This block was originally suggested by Loic Jaquemet.
+        waitme = 0
+        try:
+            current = self._status(label)
+        except NameError:
+            return
+
+        if isinstance(state, str):
+            state = [state]
+        while current not in state:
+            log.debug("Waiting %i cuckooseconds for nest %s to switch to status %s", waitme, label, state)
+            if waitme > int(self.options_globals.timeouts.vm_state):
+                raise CuckooNestError("Timeout hit while for nest {0} to change status".format(label))
+            time.sleep(1)
+            waitme += 1
+            current = self._status(label)
+
+
 class MachineManager(object):
     """Base abstract class for analysis machine manager."""
 
