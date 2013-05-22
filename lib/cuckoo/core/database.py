@@ -29,6 +29,55 @@ except ImportError:
     raise CuckooDependencyError("SQLAlchemy library not found, "
                                 "verify your setup")
 
+
+
+class Nest(Base):             
+    """Configured remote Linux machines to hold Nests."""
+    __tablename__ = "nests"   
+
+    id = Column(Integer(), primary_key=True)
+    name = Column(String(255), nullable=False)
+    label = Column(String(255), nullable=False)
+    ip = Column(String(255), nullable=False)
+    platform = Column(String(255), nullable=False)
+    locked = Column(Boolean(), nullable=False, default=False)
+    locked_changed_on = Column(DateTime(timezone=False), nullable=True)
+    status = Column(String(255), nullable=True)
+    status_changed_on = Column(DateTime(timezone=False), nullable=True)
+    machines = Column(String(255), nullable=True)                                                                                                                                              
+    def __repr__(self):       
+        return "<Nest('%s','%s')>" % (self.id, self.name)                                                                                                                                       
+    def to_dict(self):        
+        """Converts object to dict.
+        @return: dict
+        """
+        d = {}
+        for column in self.__table__.columns:
+            value = getattr(self, column.name)
+            if isinstance(value, datetime):    
+                d[column.name] = value.strftime("%Y-%m-%d %H:%M:%S")                                                                                                                            
+            else:             
+                d[column.name] = value 
+        return d              
+
+    def to_json(self):        
+        """Converts object to JSON.
+        @return: JSON data    
+        """
+        return json.dumps(self.to_dict())                                                                                                                                                       
+
+    def __init__(self,        
+                 name,
+                 label,
+                 ip,
+                 platform):
+        self.name = name
+        self.label = label
+        self.ip = ip
+        self.platform = platform
+
+
+
 class Machine(Base):
     """Configured virtual machines to be used as guests."""
     __tablename__ = "machines"
@@ -320,6 +369,17 @@ class Database(object):
         """Disconnects pool."""
         self.engine.dispose()
 
+    def clean_nests(self):    
+        """Clean old stored nests."""  
+        session = self.Session()       
+        try:
+            session.query(Nest).delete()   
+            session.commit()  
+        except SQLAlchemyError:            
+            session.rollback()
+        finally:              
+            session.close()   
+
     def clean_machines(self):
         """Clean old stored machines."""
         session = self.Session()
@@ -366,6 +426,30 @@ class Database(object):
                           ip=ip,
                           platform=platform)
         session.add(machine)
+        try:
+            session.commit()
+        except SQLAlchemyError:
+            session.rollback()
+        finally:
+            session.close()
+
+    def add_nest(self,
+                    name,
+                    label,
+                    ip,       
+                    platform):
+        """Add a guest nest.
+        @param name: nest id
+        @param labal: nest label
+        @param ip: nest IP address
+        @param platform: nest supported platform
+        """
+        session = self.Session()
+        nest = Nest(name=name,
+                          label=label,
+                          ip=ip,
+                          platform=platform)
+        session.add(nest)
         try:
             session.commit()
         except SQLAlchemyError:
@@ -479,6 +563,19 @@ class Database(object):
         finally:
             session.close()
 
+    def list_nests(self, state='Ready'):
+        """Lists nests.
+        @return: list of nests 
+        """
+        session = self.Session()
+        try:
+            nests = session.query(Nest).filter(Nest.status == state).all()
+        except SQLAlchemyError:
+            return None
+        finally:
+            session.close()
+        return nests
+
     def list_machines(self, locked=False):
         """Lists virtual machines.
         @return: list of virtual machines
@@ -494,6 +591,41 @@ class Database(object):
         finally:
             session.close()
         return machines
+
+    def lock_nest(self, name=None, platform=None):
+        """Places a lock on a free virtual nest.
+        @param name: optional virtual nest name
+        @param platform: optional virtual nest platform
+        @return: locked nest
+        """
+        session = self.Session()
+        try:
+            if name and platform:
+                # Wrong usage.
+                return None
+            elif name:
+                nest = session.query(Nest).filter(Nest.name == name).filter(Nest.locked == False).first()
+            elif platform:
+                nest = session.query(Nest).filter(Nest.platform == platform).filter(Nest.locked == False).first()
+            else:
+                nest = session.query(Nest).filter(Nest.locked == False).first()
+        except SQLAlchemyError:
+            session.close()
+            return None
+
+        if nest:
+            nest.locked = True
+            nest.locked_changed_on = datetime.now()
+            try:
+                session.commit()
+                session.refresh(nest)
+            except SQLAlchemyError:
+                session.rollback()
+                return None
+            finally:
+                session.close()
+
+        return nest
 
     def lock_machine(self, name=None, platform=None):
         """Places a lock on a free virtual machine.
@@ -530,6 +662,32 @@ class Database(object):
 
         return machine
 
+    def unlock_nest(self, label):
+        """Remove lock form a virtual nest.
+        @param label: virtual nest label
+        @return: unlocked nest
+        """
+        session = self.Session()
+        try:
+            nest = session.query(Nest).filter(Nest.label == label).first()
+        except SQLAlchemyError:
+            session.close()
+            return None
+
+        if nest:
+            nest.locked = False
+            nest.locked_changed_on = datetime.now()
+            try:
+                session.commit()
+                session.refresh(nest)
+            except SQLAlchemyError:
+                session.rollback()
+                return None
+            finally:
+                session.close()
+
+        return nest
+
     def unlock_machine(self, label):
         """Remove lock form a virtual machine.
         @param label: virtual machine label
@@ -556,6 +714,19 @@ class Database(object):
 
         return machine
 
+    def count_nests_available(self):
+        """How many virtual nests are ready for analysis.
+        @return: free virtual nest count
+        """
+        session = self.Session()
+        try:
+            nests_count = session.query(Nest).filter(Nest.locked == False).count()
+        except SQLAlchemyError:
+            return 0
+        finally:
+            session.close()
+        return nests_count
+
     def count_machines_available(self):
         """How many virtual machines are ready for analysis.
         @return: free virtual machines count
@@ -568,6 +739,31 @@ class Database(object):
         finally:
             session.close()
         return machines_count
+
+    def set_nest_status(self, label, status):
+        """Set status for a virtual nest.
+        @param label: virtual nest label
+        @param status: new virtual nest status
+        """
+        session = self.Session()
+        try:
+            nest = session.query(Nest).filter(Nest.label == label).first()
+        except SQLAlchemyError:
+            session.close()
+            return
+
+        if nest:
+            nest.status = status
+            nest.status_changed_on = datetime.now()
+            try:
+                session.commit()
+                session.refresh(nest)
+            except SQLAlchemyError:
+                session.rollback()
+            finally:
+                session.close()
+        else:
+            session.close()
 
     def set_machine_status(self, label, status):
         """Set status for a virtual machine.
@@ -619,6 +815,7 @@ class Database(object):
             priority=1,
             custom="",
             machine="",
+            nest="",
             platform="",
             memory=False,
             enforce_timeout=False):
@@ -629,6 +826,7 @@ class Database(object):
         @param priority: analysis priority.
         @param custom: custom options.
         @param machine: selected machine.
+        @param nest: selected nest.
         @param platform: platform.
         @param memory: toggle full memory dump.
         @param enforce_timeout: toggle full timeout execution.
@@ -671,6 +869,7 @@ class Database(object):
         task.priority = priority
         task.custom = custom
         task.machine = machine
+        task.nest = nest
         task.platform = platform
         task.memory = memory
         task.enforce_timeout = enforce_timeout
@@ -694,6 +893,7 @@ class Database(object):
                  priority=1,
                  custom="",
                  machine="",
+                 nest="",
                  platform="",
                  memory=False,
                  enforce_timeout=False):
@@ -704,6 +904,7 @@ class Database(object):
         @param priority: analysis priority.
         @param custom: custom options.
         @param machine: selected machine.
+        @param nest: selected nest.
         @param platform: platform.
         @param memory: toggle full memory dump.
         @param enforce_timeout: toggle full timeout execution.
@@ -719,6 +920,7 @@ class Database(object):
                         priority,
                         custom,
                         machine,
+                        nest,
                         platform,
                         memory,
                         enforce_timeout)
@@ -731,6 +933,7 @@ class Database(object):
                 priority=1,
                 custom="",
                 machine="",
+                nest="",
                 platform="",
                 memory=False,
                 enforce_timeout=False):
@@ -741,6 +944,7 @@ class Database(object):
         @param priority: analysis priority.
         @param custom: custom options.
         @param machine: selected machine.
+        @param nest: selected nest.
         @param platform: platform.
         @param memory: toggle full memory dump.
         @param enforce_timeout: toggle full timeout execution.
@@ -753,6 +957,7 @@ class Database(object):
                         priority,
                         custom,
                         machine,
+                        nest,
                         platform,
                         memory,
                         enforce_timeout)
@@ -843,6 +1048,21 @@ class Database(object):
             session.expunge(sample)
             session.close()
         return sample
+
+    def view_nest(self, name):
+        """Show virtual nest.
+        @params name: virtual nest name
+        @return: virtual nest's details
+        """
+        session = self.Session()
+        try:
+            nest = session.query(Nest).filter(Nest.name == name).first()
+        except SQLAlchemyError:
+            return None
+        finally:
+            session.expunge(nest)
+            session.close()
+        return nest
 
     def view_machine(self, name):
         """Show virtual machine.

@@ -409,3 +409,14 @@ class Scheduler:
                 pass
             else:
                 raise exc
+
+    def pause(self):
+        """Pause scheduler."""
+        self.running = False  
+        log.info("Scheduler is paused...")
+
+    def panic(self):          
+        """Panic scheduler."""
+        self.running = False  
+        log.info("Scheduler is panicked...")
+
