@@ -31,6 +31,7 @@ def main():
     parser.add_argument("-d", "--debug", help="Display debug messages", action="store_true", required=False)
     parser.add_argument("-v", "--version", action="version", version="You are running Cuckoo Sandbox %s" % CUCKOO_VERSION)
     parser.add_argument("-a", "--artwork", help="Show artwork", action="store_true", required=False)
+    parser.add_argument("-m", "--mode", help="Start matracas with this mode", choices=['Play', 'Stop', 'Pause', 'Panic'], dest="mode", default="Play" )
     args = parser.parse_args()
 
     if args.artwork:
@@ -55,6 +56,15 @@ def main():
 
     try:
         sched = Scheduler()
+
+        if args.mode == "Play":            
+            sched.start()
+        elif args.mode == "Pause":         
+            sched.pause()     
+        elif args.mode == "Stop":          
+            sched.stop()
+        elif args.mode == "Panic":         
+            sched.panic()
         sched.start()
     except KeyboardInterrupt:
         sched.stop()
