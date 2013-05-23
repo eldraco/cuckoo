@@ -273,6 +273,7 @@ class Task(Base):
     priority = Column(Integer(), server_default="1", nullable=False)
     custom = Column(String(255), nullable=True)
     machine = Column(String(255), nullable=True)
+    nest = Column(String(255), nullable=True)
     package = Column(String(255), nullable=True)
     options = Column(String(255), nullable=True)
     platform = Column(String(255), nullable=True)

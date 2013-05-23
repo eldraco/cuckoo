@@ -33,6 +33,7 @@ log = logging.getLogger(__name__)
 mmanager = None
 nmanager = None
 machine_lock = Lock()
+nest_lock = Lock()
 
 class AnalysisManager(Thread):
     """Analysis Manager.
@@ -112,6 +113,30 @@ class AnalysisManager(Thread):
 
         return True
 
+    def acquire_nest(self):
+        """Acquire an analysis nest from the pool of available ones."""
+        nest = None
+
+        # Start a loop to acquire the nest to run the analysis on.
+        while True:
+            nest_lock.acquire()
+            # If the user specified a specific nest ID or a platform to be
+            # used, acquire the nest accordingly.
+            nest = nmanager.acquire(nest_id=self.task.nest,
+                                       platform=self.task.platform)
+            nest_lock.release()
+
+            # If no nest is available at this moment, wait for one second
+            # and try again.
+            if not nest:
+                log.debug("Task #%d: no nest available yet", self.task.id)
+                time.sleep(1)
+            else:
+                log.info("Task #%d: acquired nest %s (label=%s)", self.task.id, nest.name, nest.label)
+                break
+
+        return nest
+
     def acquire_machine(self):
         """Acquire an analysis machine from the pool of available ones."""
         machine = None
@@ -181,98 +206,110 @@ class AnalysisManager(Thread):
         # Generate the analysis configuration file.
         options = self.build_options()
 
-        # Acquire analysis machine.
-        machine = self.acquire_machine()
+        # Acquire analysis nest.
+        #machine = self.acquire_machine()
+        nest = self.acquire_nest()
 
         # At this point we can tell the Resultserver about it
         try:
-            Resultserver().add_task(self.task, machine)
+            Resultserver().add_task(self.task, nest)
         except Exception as e:
-            mmanager.release(machine.label)
+            nmanager.release(nest.label)
             self.errors.put(e)
 
         # If enabled in the configuration, start the tcpdump instance.
-        if self.cfg.sniffer.enabled:
-            sniffer = Sniffer(self.cfg.sniffer.tcpdump)
-            sniffer.start(interface=self.cfg.sniffer.interface,
-                          host=machine.ip,
-                          file_path=os.path.join(self.storage, "dump.pcap"))
+        #if self.cfg.sniffer.enabled:
+        #    sniffer = Sniffer(self.cfg.sniffer.tcpdump)
+        #    sniffer.start(interface=self.cfg.sniffer.interface,
+        #                  host=machine.ip,
+        #                  file_path=os.path.join(self.storage, "dump.pcap"))
 
         try:
-            # Mark the selected analysis machine in the database as started.
-            guest_log = Database().guest_start(self.task.id,
-                                               machine.name,
-                                               machine.label,
-                                               mmanager.__class__.__name__)
-            # Start the machine.
-            mmanager.start(machine.label)
-        except CuckooMachineError as e:
+            # Mark the selected analysis nest in the database as started.
+            #guest_log = Database().guest_start(self.task.id,
+            #                                   nest.name,
+            #                                   nest.label,
+            #                                   nmanager.__class__.__name__)
+
+            # Start the nest.
+            nmanager.start(nest.label)
+
+        except CuckooNestError as e:
             log.error(str(e), extra={"task_id" : self.task.id})
 
             # Stop the sniffer.
-            if sniffer:
-                sniffer.stop()
+            #if sniffer:
+            #    sniffer.stop()
 
             return False
         else:
             try:
+                ## Initialize the guest manager.
+                #guest = GuestManager(machine.name, machine.ip, machine.platform)
+                ## Start the analysis.
+                #guest.start_analysis(options)
+
                 # Initialize the guest manager.
-                guest = GuestManager(machine.name, machine.ip, machine.platform)
+                #guest = GuestManager(machine.name, machine.ip, machine.platform)
                 # Start the analysis.
-                guest.start_analysis(options)
-            except CuckooGuestError as e:
+                #guest.start_analysis(options)
+                log.info("Here we send the task %d to the nest %s", self.task.id, nest.label)
+                #nmanager.send_task(self.task)
+
+            except CuckooNestError as e:
                 log.error(str(e), extra={"task_id" : self.task.id})
 
                 # Stop the sniffer.
-                if sniffer:
-                    sniffer.stop()
+                #if sniffer:
+                #    sniffer.stop()
 
                 return False
             else:
                 # Wait for analysis completion.
                 try:
-                    guest.wait_for_completion()
+                #    guest.wait_for_completion()
                     succeeded = True
-                except CuckooGuestError as e:
+                except CuckooNestError as e:
                     log.error(str(e), extra={"task_id" : self.task.id})
                     succeeded = False
 
         finally:
             # Stop the sniffer.
-            if sniffer:
-                sniffer.stop()
+            #if sniffer:
+            #    sniffer.stop()
 
             # Take a memory dump of the machine before shutting it off.
-            if self.cfg.cuckoo.memory_dump or self.task.memory:
-                try:
-                    mmanager.dump_memory(machine.label,
-                                         os.path.join(self.storage, "memory.dmp"))
-                except NotImplementedError:
-                    log.error("The memory dump functionality is not available "
-                              "for current machine manager")
-                except CuckooMachineError as e:
-                    log.error(e)
+            #if self.cfg.cuckoo.memory_dump or self.task.memory:
+            #    try:
+            #        mmanager.dump_memory(machine.label,
+            #                             os.path.join(self.storage, "memory.dmp"))
+            #    except NotImplementedError:
+            #        log.error("The memory dump functionality is not available "
+            #                  "for current machine manager")
+            #    except CuckooMachineError as e:
+            #        log.error(e)
 
             try:
-                # Stop the analysis machine.
-                mmanager.stop(machine.label)
-            except CuckooMachineError as e:
-                log.warning("Unable to stop machine %s: %s", machine.label, e)
+                # Stop the analysis nest.
+                nmanager.stop(nest.label)
+            except CuckooNestError as e:
+                log.warning("Unable to stop nest %s: %s", nest.label, e)
 
-            # Market the machine in the database as stopped.
-            Database().guest_stop(guest_log)
+            # Mark the machine in the database as stopped.
+            #Database().guest_stop(guest_log)
 
             try:
-                # Release the analysis machine.
-                mmanager.release(machine.label)
-            except CuckooMachineError as e:
-                log.error("Unable to release machine %s, reason %s. "
-                          "You might need to restore it manually", machine.label, e)
+                # Release the analysis nest.
+                nmanager.release(nest.label)
+            except CuckooNesetError as e:
+                log.error("Unable to release nest %s, reason %s. "
+                          "You might need to restore it manually", nest.label, e)
 
             # after all this, we can make the Resultserver forget about it
-            Resultserver().del_task(self.task, machine)
+            Resultserver().del_task(self.task, nest)
 
         return succeeded
+
 
     def process_results(self):
         """Process the analysis results and generate the enabled reports."""
@@ -311,10 +348,10 @@ class AnalysisManager(Thread):
         success = self.launch_analysis()
         Database().complete(self.task.id, success)
 
-        self.process_results()
+        #self.process_results()
 
         log.debug("Released database task #%d with status %s", self.task.id, success)
-        log.info("Task #%d: analysis procedure completed", self.task.id)
+        #log.info("Task #%d: analysis procedure completed", self.task.id)
 
 class Scheduler:
     """Tasks Scheduler.

@@ -26,6 +26,10 @@ class CuckooMachineError(CuckooOperationalError):
     """Error managing analysis machine."""
     pass
 
+class CuckooNestError(CuckooOperationalError):
+    """Error managing analysis Nest."""
+    pass
+
 class CuckooAnalysisError(CuckooOperationalError):
     """Error during analysis."""
     pass
