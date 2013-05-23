@@ -8,6 +8,10 @@ import time
 import logging
 import subprocess
 import os.path
+try:
+    import paramiko
+except (CuckooDependencyError, ImportError) as e:
+    sys.exit("ERROR: Missing dependency: %s" % e)
 
 from lib.cuckoo.common.abstracts import NestManager
 from lib.cuckoo.common.exceptions import CuckooCriticalError
@@ -25,6 +29,19 @@ class Linux(NestManager):
     ABORTED = "aborted"
     ERROR = "machete"
 
+    def run(self,label, command):
+        """run 
+        Execute this command on the nest"""
+        if command:
+            stdin, stdout, stderr = self.connections[label].exec_command(command)
+            stdin.close()
+            for line in stdout.read().splitlines():
+                print 'host: %s: %s' % (label, line)
+
+    def close(self):
+        self.connection.close()
+
+
     def _initialize_check(self):
         """Runs all checks when a machine manager is initialized.
         @raise CuckooMachineError: if VBoxManage is not found.
@@ -36,9 +53,22 @@ class Linux(NestManager):
         @param label: virtual machine name.
         @raise CuckooMachineError: if unable to start.
         """
-        # Here we should get the ssh connection to the nest.:w
         log.debug("Starting nest %s" % label)
-        #os.system('ping -c 5 127.0.0.1')
+
+        # Here we should get the ssh connection to the nest.
+        try:
+            client = paramiko.SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            nest_ip = self.get_ip(label)
+            nest_username = self.get_username(label)
+            nest_password = self.get_password(label)
+            client.connect(nest_ip, username=nest_username, password=nest_password)
+            self.connections[label] = client
+
+        except KeyboardInterrupt:
+            return
+
+        
 
 
 

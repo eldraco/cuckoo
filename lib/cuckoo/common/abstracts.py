@@ -31,6 +31,8 @@ class NestManager(object):
         self.db = Database()  
         # Petripot table is cleaned to be filled from configuration file at each start.
         self.db.clean_nests() 
+        # To hold all the connections to the nests
+        self.connections = {}
 
     def set_options(self, options):
         """Set petripot manager options.
@@ -63,10 +65,14 @@ class NestManager(object):
                 nest.label = nest_opts["label"].strip()
                 nest.platform = nest_opts["platform"].strip()
                 nest.ip = nest_opts["ip"].strip()
+                nest.username = nest_opts["username"].strip()
+                nest.password = nest_opts["password"].strip()
 
                 self.db.add_nest(name=nest.id,
                                     label=nest.label,
                                     ip=nest.ip,
+                                    username=nest.username,
+                                    password=nest.password,
                                     platform=nest.platform)
             except (AttributeError, CuckooOperationalError):
                 log.warning("Configuration details about nest %s are missing. Continue", nest_id)
@@ -122,6 +128,24 @@ class NestManager(object):
         @param label: nest name.
         """
         self.db.unlock_nest(label)
+
+    def get_ip(self,label):
+        """Returns running nests ip address.
+        @return: running nests ip address.
+        """
+        return self.db.get_ip(label)
+
+    def get_username(self,label):
+        """Returns running nest username.
+        @return: running nests username
+        """
+        return self.db.get_username(label)
+
+    def get_password(self,label):
+        """Returns running nest password.
+        @return: running nests password
+        """
+        return self.db.get_password(label)
 
     def running(self):
         """Returns running virtual nests.

@@ -11,6 +11,7 @@ import Queue
 from threading import Thread, Lock
 
 from lib.cuckoo.common.constants import CUCKOO_ROOT
+from lib.cuckoo.common.exceptions import CuckooNestError
 from lib.cuckoo.common.exceptions import CuckooMachineError
 from lib.cuckoo.common.exceptions import CuckooGuestError
 from lib.cuckoo.common.exceptions import CuckooOperationalError
@@ -233,6 +234,7 @@ class AnalysisManager(Thread):
 
             # Start the nest.
             nmanager.start(nest.label)
+            nmanager.run(nest.label,'uname -a')
 
         except CuckooNestError as e:
             log.error(str(e), extra={"task_id" : self.task.id})

@@ -39,6 +39,8 @@ class Nest(Base):
     name = Column(String(255), nullable=False)
     label = Column(String(255), nullable=False)
     ip = Column(String(255), nullable=False)
+    username = Column(String(255), nullable=False)
+    password = Column(String(255), nullable=False)
     platform = Column(String(255), nullable=False)
     locked = Column(Boolean(), nullable=False, default=False)
     locked_changed_on = Column(DateTime(timezone=False), nullable=True)
@@ -70,10 +72,14 @@ class Nest(Base):
                  name,
                  label,
                  ip,
+                 username,
+                 password,
                  platform):
         self.name = name
         self.label = label
         self.ip = ip
+        self.username = username
+        self.password = password
         self.platform = platform
 
 
@@ -438,17 +444,23 @@ class Database(object):
                     name,
                     label,
                     ip,       
+                    username,
+                    password,
                     platform):
         """Add a guest nest.
         @param name: nest id
         @param labal: nest label
         @param ip: nest IP address
+        @param username: nest username 
+        @param password: nest password 
         @param platform: nest supported platform
         """
         session = self.Session()
         nest = Nest(name=name,
                           label=label,
                           ip=ip,
+                          username=username,
+                          password=password,
                           platform=platform)
         session.add(nest)
         try:
@@ -563,6 +575,54 @@ class Database(object):
             session.rollback()
         finally:
             session.close()
+
+    def get_ip(self, label):
+        """Get the ip of the nest.
+        @return: ip address 
+        """
+        session = self.Session()
+        try:
+            if label:
+                ip_address = session.query(Nest).filter(Nest.label == label ).value("ip")
+            else:
+                ip_address = session.query(Nest).value("ip")
+        except SQLAlchemyError:
+            return None
+        finally:
+            session.close()
+        return ip_address
+
+    def get_username(self, label):
+        """Get the username for the nest.
+        @return: username
+        """
+        session = self.Session()
+        try:
+            if label:
+                username = session.query(Nest).filter(Nest.label == label ).value("username")
+            else:
+                username = session.query(Nest).value("username")
+        except SQLAlchemyError:
+            return None
+        finally:
+            session.close()
+        return username
+
+    def get_password(self, label):
+        """Get the password for the nest.
+        @return: password
+        """
+        session = self.Session()
+        try:
+            if label:
+                password = session.query(Nest).filter(Nest.label == label ).value("password")
+            else:
+                password = session.query(Nest).value("password")
+        except SQLAlchemyError:
+            return None
+        finally:
+            session.close()
+        return password
 
     def list_nests(self, state=False):
         """Lists nests.
